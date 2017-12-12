@@ -17,59 +17,50 @@
 package net.orpiske.mdp.plot;
 
 
-
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVRecord;
-import org.apache.commons.csv.QuoteMode;
-import org.apache.commons.io.IOUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.zip.GZIPInputStream;
 
 /**
  * A reader for the rate information
  */
-public class DefaultRateReader implements RateReader {
-    private static final Logger logger = LoggerFactory.getLogger(DefaultRateReader.class);
+public final class DefaultRateReader implements RateReader {
 
-    private Processor processor;
+    private final Processor processor;
 
     public DefaultRateReader(Processor processor) {
         this.processor = processor;
     }
 
+    public static final char SEPARATOR = ',';
 
-    public void read(final String filename) throws IOException {
-        InputStream fileStream = null;
-        InputStream gzipStream = null;
-        Reader in = null;
-
-        logger.debug("Reading file {}", filename);
-
-        try {
-            fileStream = new FileInputStream(filename);
-            gzipStream= new GZIPInputStream(fileStream);
-
-            in = new InputStreamReader(gzipStream);
-
-            Iterable<CSVRecord> records = CSVFormat.RFC4180
-                    .withCommentMarker('#')
-                    .withFirstRecordAsHeader()
-                    .withRecordSeparator(',')
-                    .withQuote('"')
-                    .withQuoteMode(QuoteMode.NON_NUMERIC)
-                    .parse(in);
-
-            for (CSVRecord record : records) {
-                processor.process(record.get(0), record.get(1));
-            }
+    @Override
+    public long read(String fileName) throws IOException {
+        final Processor processor = this.processor;
+        final boolean compressed = fileName.endsWith(".gz");
+        final File file = new File(fileName);
+        final InputStream inputStream;
+        if (compressed) {
+            inputStream = new GZIPInputStream(new FileInputStream(file));
+        } else {
+            inputStream = new FileInputStream(file);
         }
-        finally {
-            IOUtils.closeQuietly(in);
-            IOUtils.closeQuietly(gzipStream);
-            IOUtils.closeQuietly(fileStream);
+        try (BufferedReader stream = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.US_ASCII))) {
+            if (stream.readLine() == null) {
+                return 0;
+            }
+            long samples = 0;
+            String line;
+            while ((line = stream.readLine()) != null) {
+                final int separatorIndex = line.indexOf(SEPARATOR);
+                assert separatorIndex != -1 : "Wrong separator";
+                final String start = line.substring(1, separatorIndex - 1);
+                final String end = line.substring(separatorIndex + 2, line.length() - 1);
+                processor.process(start, end);
+                samples++;
+
+            }
+            return samples;
         }
     }
 }
